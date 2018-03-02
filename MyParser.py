@@ -1,24 +1,4 @@
-class Node:
-    pass
-
-
-class BinaryNode(Node):
-    def __init__(self, op, left, right):
-        self.op = op
-        self.right = right
-        self.left = left
-
-
-class UnaryNode(Node):
-    def __init__(self, op, child):
-        self.op = op
-        self.child = child
-
-
-class Leaf(Node):
-    def __init__(self, t, value):
-        self.t = t
-        self.value = value
+from AST import *
 
 
 def parse(tokens: [str, str]) -> Node:
@@ -26,7 +6,7 @@ def parse(tokens: [str, str]) -> Node:
         [token] = tokens
         return token
     if len(tokens) == 1:
-        parse_Leaf(tokens)
+        parse_leaf(tokens)
     tokens = parse_parentheses(tokens)
     tokens = parse_binary_op(tokens, ['*', '/', 'MOD'], reverse=False)
     tokens = parse_binary_op(tokens, ['+', '-'], reverse=False)
@@ -83,6 +63,7 @@ def parse_unary_op(tokens, op, reverse):
             else:
                 index = i + 1
             node = UnaryNode(token[0], parse(tokens[index]))
+            node.child.parent = node
             tokens[i] = node
             new_tokens.pop()
             new_tokens.append(node)
@@ -109,6 +90,8 @@ def parse_binary_op(tokens, op, reverse):
                 next_token = tokens[i - 1]
                 prev_token = tokens[i + 1]
             node = BinaryNode(token[0], parse(prev_token), parse(next_token))
+            node.left.parent = node
+            node.right.parent = node
             skip_node = True
             new_tokens.pop()
             new_tokens.append(node)
@@ -122,8 +105,9 @@ def parse_binary_op(tokens, op, reverse):
         return new_tokens
 
 
-def parse_Leaf(tokens):
+def parse_leaf(tokens):
     return Leaf(tokens[0][1], tokens[0][0])
+
 
 
 
