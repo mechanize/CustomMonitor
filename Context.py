@@ -9,4 +9,11 @@ class Context:
         self.count += 1
         return self.name + str(self.count)
 
-    def
+    def cycle_name(self):
+        self.names.append(self.name)
+        self.names.pop(0)
+        self.name = self.names[0]
+        self.count = 0
+
+
+

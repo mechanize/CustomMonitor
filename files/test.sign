@@ -1,0 +1,5 @@
+in(type:string, weight:int, vault_no:int)
+out(type:string, weight:int, vault_no:int)
+open()
+close()
+cust(vault_no:int)

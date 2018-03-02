@@ -7,6 +7,8 @@ INT = 'INT'
 VAR = 'VAR'
 
 basic_rules = [
+    (r'[ \n\t]+', None),
+    (r'#[^\n]*', None),
     (r"\(", RESERVED),
     (r"\)", RESERVED),
     (r"IMPLIES", REWRITABLE),
@@ -33,7 +35,7 @@ basic_rules = [
 ]
 
 
-def lex(characters, lexer_rules):
+def lex(characters, lexer_rules) -> [(str, str)]:
     pos = 0
     tokens = []
     while pos < len(characters):
