@@ -2,6 +2,8 @@ from sys import argv
 import util
 import Lexer
 import MyParser
+import sqlite3
+from Context import Context
 
 SIGNATURE = 'SIGNATURE'
 sig_loc, formula_loc, log_loc = argv[1:4]
@@ -19,3 +21,7 @@ rules.extend(Lexer.get_rules())
 tokens = Lexer.lex(util.parse_formula(formula_loc), rules)
 node = MyParser.parse(tokens)
 print(node.to_str())
+
+conn = sqlite3.connect(":memory:")
+cursor = conn.cursor()
+context = Context(cursor, ["A", "B"])
