@@ -72,10 +72,12 @@ def parse_unary_op(tokens, op, reverse, sub):
             if token[0] in op:
                 if reverse:
                     next_token = tokens[i - 1]
-                    next_next_token = tokens[i - 2]
+                    if sub:
+                        next_next_token = tokens[i - 2]
                 else:
                     next_token = tokens[i + 1]
-                    next_next_token = tokens[i + 2]
+                    if sub:
+                        next_next_token = tokens[i + 2]
                 if sub:
                     node = UnaryNode(token[0], parse([next_next_token]), parse_sub(next_token))
                 else:
@@ -107,11 +109,13 @@ def parse_binary_op(tokens, op, reverse, sub):
             if token[0] in op:
                 if reverse:
                     next_token = tokens[i - 1]
-                    next_next_token = tokens[i - 2]
+                    if sub:
+                        next_next_token = tokens[i - 2]
                     prev_token = tokens[i + 1]
                 else:
                     next_token = tokens[i + 1]
-                    next_next_token = tokens[i + 2]
+                    if sub:
+                        next_next_token = tokens[i + 2]
                     prev_token = tokens[i - 1]
                 if sub:
                     node = BinaryNode(token[0], parse([prev_token]), parse([next_next_token]), parse_sub(next_token))

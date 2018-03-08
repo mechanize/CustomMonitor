@@ -96,21 +96,21 @@ def union(first: EvalObject, second: EvalObject, context: Context) -> EvalObject
                 if join_variables == {}:
                     name = empty_table(first.fv.union(second.fv), context)
                 else:
-                    name = inner_join(first.name, second.name, first.fv.intersection(second.fv), context)
+                    name = inner_join(first.name, second.name, first.fv, second.fv, context)
                 return Table(name, first.fv.union(second.fv), True)
             elif first.is_negative and not second.is_negative:
-                name = diff(first.name, second.name, first.fv.union(second.fv), context)
+                name = diff(first.name, second.name, first.fv, second.fv, context)
                 return Table(name, first.fv, True)
             elif not first.is_negative and second.is_negative:
-                name = diff(second.name, first.name, first.fv.union(second.fv), context)
+                name = diff(second.name, first.name, second.fv, first.fv, context)
                 return Table(name, second.fv, True)
             else:
                 join_variables = first.fv.intersection(second.fv)
                 if join_variables == {}:
                     name = cross_join(first.name, second.name, context)
                 else:
-                    name = outer_join(first.name, second.name, first.fv.intersection(second.fv), context)
-                return Table(name, first.fv.union(second.fv), True)
+                    name = outer_join(first.name, second.name, first.fv, second.fv, context)
+                return Table(name, first.fv.union(second.fv), False)
     else:
         raise RuntimeError("union:", first, second)
 
@@ -158,18 +158,18 @@ def intersection(first: EvalObject, second: EvalObject, context: Context) -> Eva
                     name = outer_join(first.name, second.name, first.fv.intersection(second.fv), context)
                 return Table(name, first.fv.union(second.fv), True)
             elif first.is_negative and not second.is_negative:
-                name = diff(second.name, first.name, first.fv.union(second.fv), context)
+                name = diff(second.name, first.name, second.fv, first.fv, context)
                 return Table(name, first.fv, False)
             elif not first.is_negative and second.is_negative:
-                name = diff(first.name, second.name, first.fv.union(second.fv), context)
+                name = diff(first.name, second.name, first.fv, second.fv, context)
                 return Table(name, second.fv, False)
             else:
                 join_variables = first.fv.intersection(second.fv)
                 if join_variables == {}:
                     name = empty_table(first.fv.union(second.fv), context)
                 else:
-                    name = inner_join(first.name, second.name, first.fv.intersection(second.fv), context)
-                return Table(name, first.fv.union(second.fv), True)
+                    name = inner_join(first.name, second.name, first.fv, second.fv, context)
+                return Table(name, first.fv.union(second.fv), False)
     else:
         raise RuntimeError("intersection:", first, second)
 
@@ -182,105 +182,155 @@ def negation(v: EvalObject, context: Context) -> EvalObject:
         return Not(v)
 
     elif isinstance(v, Table):
-        return Table(empty_table(v.fv, context), v.fv, not v.is_negative)
+        return Table(table_copy(v.name, context), v.fv, not v.is_negative)
 
     else:
         raise RuntimeError("negation:", v)
 
 
 def table_with_condition(table: Table, condition: Condition, context: Context) -> Table:
-    sql = """INSERT INTO ?
-             SELECT * FROM ? 
-             WHERE ? """
+    sql = """CREATE TABLE {dest} AS
+             SELECT * FROM {src}
+             WHERE {condition} """
     name = context.get_table_name()
-    context.cursor.execute(sql, name, table.name, condition.to_str())
-    context.cursor.commit()
+    context.cursor.execute(sql.format(dest=name, src=table.name, condition=condition.to_str()))
+    context.conn.commit()
     return Table(name, table.fv, table.is_negative)
 
 
-def inner_join(first: str, second: str, join_variables: {str}, context: Context) -> str:
-    sql = """INSERT INTO ? 
-             SELECT * FROM ?
-             INNER JOIN ?
-             ON ? """
+def inner_join(first: str, second: str, first_fv: {str, str}, second_fv: {str, str}, context: Context) -> str:
+    sql = """CREATE TABLE {dest} AS
+             SELECT {selection} FROM {src1}
+             INNER JOIN {src2}
+             ON {join_condition} ;"""
     name = context.get_table_name()
+    join_variables = first_fv.intersection(second_fv)
+    other_variables = first_fv.union(second_fv).difference(join_variables)
     join_condition = " AND ".join(["".join([first, ".", e, " = ", second, ".", e]) for e, _ in join_variables])
-    context.cursor.execute(sql, name, first, second, join_condition)
-    context.cursor.commit()
+    selection = ", ".join([e for e, _ in other_variables] + [first + "." + e for e, _ in join_variables])
+    context.cursor.execute(
+        sql.format(dest=name, src1=first, src2=second, selection=selection, join_condition=join_condition))
+    context.conn.commit()
     return name
 
 
-def outer_join(first: str, second: str, join_variables: {str},  context: Context) -> str:
-    sql = """INSERT INTO ? 
-             SELECT * FROM ?
-             LEFT JOIN ?
-             ON ?
-             UNION ALL 
-             SELECT * FROM ?
-             LEFT JOIN ?
-             ON ? """
+def outer_join(first: str, second: str, first_fv: {str, str}, second_fv: {str, str},  context: Context) -> str:
+    join_variables = first_fv.intersection(second_fv)
+    first_only = first_fv.difference(second_fv)
+    second_only = second_fv.difference(first_fv)
+    sql = """CREATE TABLE {dest} AS
+             SELECT {varlist1} FROM {src1}
+             LEFT JOIN {src2}
+             ON {join_condition}
+             UNION
+             SELECT {varlist2} FROM {src2}
+             LEFT JOIN {src1}
+             ON {join_condition} """
     name = context.get_table_name()
+    varlist1 = ", ".join([first + "." + e for e, _ in first_only] + [first + "." + e for e, _ in join_variables]
+                         + [second + "." + e for e, _ in second_only])
+    varlist2 = ", ".join([first + "." + e for e, _ in first_only] + [second + "." + e for e, _ in join_variables]
+                         + [second + "." + e for e, _ in second_only])
     join_condition = " AND ".join(["".join([first, ".", e, " = ", second, ".", e]) for e, _ in join_variables])
-    context.cursor.execute(sql, name, first, second, join_condition, second, first, join_condition)
-    context.cursor.commit()
+    context.cursor.execute(sql.format(dest=name, src1=first, src2=second, varlist1=varlist1, varlist2=varlist2,
+                                      join_condition=join_condition))
+    context.conn.commit()
     return name
 
 
 def cross_join(first: str, second: str, context: Context) -> str:
-    sql = """INSERT INTO ?
-             SELECT * FROM ?
-             CROSS JOIN ? """
+    sql = """CREATE TABLE {dest} AS
+             SELECT * FROM {src1}
+             CROSS JOIN {src2} """
     name = context.get_table_name()
-    context.cursor.execute(sql, name, first, second)
-    context.cursor.commit()
+    context.cursor.execute(sql.format(dest=name, src1=first, src2=second))
+    context.conn.commit()
     return name
 
 
-def diff(first: str, second: str, join_variables: {str}, context: Context) -> str:
-    sql = """INSERT INTO ? 
-             SELECT * FROM
-            (SELECT ? FROM ?
+def diff(first: str, second: str, first_fv: {str, str}, second_fv: {str, str}, context: Context) -> str:
+    if not second_fv.issubset(first_fv):
+        raise RuntimeError("For A \\ B, B has to be subset of A")
+    join_variables = second_fv
+    sql = """CREATE TABLE {dest} AS
+             SELECT {varlist0} FROM
+            (SELECT {varlist1} FROM {src1}
              EXCEPT
-             SELECT ? FROM ?)
-             INNER JOIN ? """
+             SELECT {varlist2} FROM {src2}) AS Some_table
+             INNER JOIN {src1} ON {join_condition} """
     name = context.get_table_name()
-    var_list = ", ".join([e for e, _ in join_variables])
-    context.cursor.execute(sql, name, var_list, first, var_list, second, first)
-    context.cursor.commit()
+    varlist0 = ", ".join([first + "." + e for e, _ in first_fv])
+    varlist1 = ", ".join([first + "." + e for e, _ in join_variables])
+    varlist2 = ", ".join([second + "." + e for e, _ in join_variables])
+    join_condition = " AND ".join([first + "." + e + " = Some_table." + e for e, _ in join_variables])
+    #print("diff: ", end="")
+    #print(sql.format(dest=name, varlist0=varlist0, varlist1=varlist1, varlist2=varlist2, src1=first,
+    #                 src2=second, join_condition=join_condition))
+    context.cursor.execute(sql.format(dest=name, varlist0=varlist0, varlist1=varlist1, varlist2=varlist2, src1=first,
+                                      src2=second, join_condition=join_condition))
+    context.conn.commit()
     return name
 
 
-def empty_table(fv: {str}, context: Context) -> str:
-    sql = """CREATE TABLE ? (
-             ? );"""
+def empty_table(fv: {str, str}, context: Context) -> str:
+    sql = """CREATE TABLE {dest} (
+             {varlist} );"""
     name = context.get_table_name()
-    var_list = [e + " " + i + ",\n" for e, i in fv]
-    context.cursor.execute(sql, name, var_list)
-    context.cursor.commit()
+    var_list = ",\n".join([e + " " + i for e, i in fv])
+    context.cursor.execute(sql.format(dest=name, varlist=var_list))
+    context.conn.commit()
     return name
 
 
 def table_copy(first: str, context: Context) -> str:
-    sql = """INSERT INTO ?
-             SELECT * FROM ?; """
+
+    sql = """CREATE TABLE {dest} AS
+            SELECT * FROM {src}; """
     name = context.get_table_name()
-    context.cursor.execute(sql, name, first)
-    context.cursor.commit()
+    context.cursor.execute(sql.format(dest=name, src=first))
+    context.conn.commit()
+
     return name
 
 
-def projection(first: str, fv: {str}, context: Context) -> str:
-    sql = """INSERT INTO ?
-             SELECT ? FROM ? """
+def projection(first: str, fv: {str, str}, context: Context) -> str:
+    sql = """CREATE TABLE {dest} AS 
+             SELECT {varlist} FROM {src} """
     name = context.get_table_name()
-    varlist = ", ".join([first + "." + e for e in fv])
-    context.cursor.execute(sql, name, varlist, first)
-    context.cursor.commit()
+    varlist = ", ".join([first + "." + e for e, _ in fv])
+    context.cursor.execute(sql.format(dest=name, varlist=varlist, src=first))
+    context.conn.commit()
     return name
 
 
-def get_tuples(table: str, context: Context) -> [tuple]:
-    sql = """SELECT * FROM ? """
-    tuples = context.cursor.execute(sql, table)
-    context.cursor.commit()
+def get_tuples(table: str, fv: {(str, str)}, context: Context) -> [tuple]:
+    sql = """SELECT {varlist} FROM {src} """
+    varlist = ", ".join([e for e, _ in fv])
+    tuples = []
+    for t in context.cursor.execute(sql.format(src=table, varlist=varlist)):
+        tuples.append(t)
+    context.conn.commit()
     return tuples
+
+
+def table_from_tuples(fv: [(str, str)] or [[str, str]], tuples: [tuple], context: Context) -> str:
+    sql = """CREATE TABLE {name} (
+             {varlist} );"""
+    name = context.get_table_name()
+    var_list = ",\n".join([e + " " + i for e, i in fv])
+    varlist2 = ", ".join([e for e, _ in fv])
+    sql2 = """INSERT INTO {dest} ({varlist2}) VALUES ({values});"""
+    with context.conn:
+        #print(sql.format(name=name, varlist=var_list))
+        context.cursor.execute(sql.format(name=name, varlist=var_list))
+        for t in tuples:
+            #print(sql2.format(dest=name, varlist2=varlist2, values=", ".join([format_value(e) for e in t])))
+            context.cursor.execute(sql2.format(dest=name, varlist2=varlist2, values=", ".join([format_value(e) for e in t])))
+    return name
+
+
+def format_value(value: int or str) -> str:
+    if isinstance(value, int):
+        return str(value)
+    elif isinstance(value, str):
+        return "\"" + value + "\""

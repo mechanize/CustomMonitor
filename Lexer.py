@@ -22,16 +22,16 @@ basic_rules = [
     (r"AND", RESERVED),
     (r"OR", RESERVED),
     (r"NOT", RESERVED),
-    (r"=", RESERVED),
-    (r"<", RESERVED),
-    (r">", RESERVED),
     (r"<=", RESERVED),
     (r">=", RESERVED),
+    (r"<", RESERVED),
+    (r">", RESERVED),
+    (r"=", RESERVED),
     (r"EXISTS", RESERVED),
     (r"FORALL", RESERVED),
     (r"TRUE", RESERVED),
     (r"FALSE", RESERVED),
-    (".[a-z]+(,[a-z]+)*", VARLIST),
+    ("\.[a-z]+(,[a-z]+)*", VARLIST),
     (r"[0-9]+", INT),
     (r"[A-Za-z][A-Za-z0-9_]*", VAR)
 ]
@@ -53,7 +53,7 @@ def lex(characters, lexer_rules) -> [(str, str)]:
                     tokens.append(token)
                 break
         if not match:
-            raise RuntimeError("Illegal character \"" + characters[pos] + "\" at position " + pos)
+            raise RuntimeError("Illegal character \"" + characters[pos] + "\" at position " + str(pos))
         else:
             pos = match.end(0)
     return tokens

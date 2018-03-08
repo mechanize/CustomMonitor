@@ -1,1 +1,1 @@
-NOT NOT (in(t,w,v) AND out(a,b,c)) OR (v=2 AND t>3)
+in(t,w,f) IMPLIES (NOT close() SINCE open())
