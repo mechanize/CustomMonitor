@@ -40,8 +40,29 @@ def visit(node: Node, data: dict, context: Context) -> EvalObject:
                 else:
                     raise RuntimeError("EQUIV must contain tables on both sides")
             elif node.op == 'SINCE':
-                previous = context.previous[context.get_current_index()]
-                res = union(right, intersection(left, previous, context), context)
+                if node.sub:
+                    start, end = node.sub
+                    ts_diff = context.current_ts - context.previous_ts
+                    res = None
+                    for to in range(0, end + 1):
+                        frm = max(0, to - (end - start))
+                        if frm > 0:
+                            if ts_diff <= to:
+                                res = context.previous[context.get_current_index() - ts_diff]
+                            else:
+                                res = Bool(False)
+                        else:
+                            if frm <= ts_diff <= to:
+                                previous = context.previous[context.get_current_index() - ts_diff]
+                            else:
+                                previous = Bool(False)
+                            res = union(right, intersection(left, previous, context), context)
+                        if to < end:
+                            context.current.append(res)
+
+                else:
+                    previous = context.previous[context.get_current_index()]
+                    res = union(right, intersection(left, previous, context), context)
             else:
                 raise RuntimeError("Unhandled operator " + node.op)
     elif isinstance(node, UnaryNode):
@@ -50,34 +71,98 @@ def visit(node: Node, data: dict, context: Context) -> EvalObject:
             res = negation(child, context)
         elif node.op == 'EXISTS':
             if isinstance(child, Table):
-                if set(node.sub).issubset(child.fv):
-                    fv = child.fv.difference(set(node.sub))
-                    if child.is_negative:
-                        res = Table(empty_table(fv, context), fv, child.is_negative)
+                if set(node.sub).issubset([e[0] for e in child.fv]):
+                    fv = set()
+                    for e in child.fv:
+                        if not e[0] in node.sub:
+                            fv.add(e)
+                    if fv == set():
+                        if child.is_negative:
+                            res = Bool(False)
+                        else:
+                            if get_tuples(child.name, child.fv, context):
+                                res = Bool(True)
+                            else:
+                                res = Bool(False)
                     else:
-                        res = Table(projection(child.name, fv, context), fv, child.is_negative)
+                        if child.is_negative:
+                            res = Table(empty_table(fv, context), fv, child.is_negative)
+                        else:
+                            res = Table(projection(child.name, fv, context), fv, child.is_negative)
                 else:
-                    raise RuntimeError("EXISTS: %s has to be subset of %s" % node.sub, child.fv)
+                    raise RuntimeError("EXISTS: %s has to be subset of %s" % (node.sub, child.fv))
             else:
                 raise RuntimeError("EXISTS of non-Table not supported")
         elif node.op == 'FORALL':
             if isinstance(child, Table):
                 if set(node.sub).issubset(child.fv):
                     fv = child.fv.difference(set(node.sub))
-                    if child.is_negative:
-                        res = Table(projection(child.name, fv, context), fv, child.is_negative)
+                    if fv == set():
+                        if child.is_negative:
+                            if get_tuples(child.name, child.fv, context):
+                                res = Bool(True)
+                            else:
+                                res = Bool(False)
+                        else:
+                            res = Bool(False)
                     else:
-                        res = Table(empty_table(fv, context), fv, child.is_negative)
+                        if child.is_negative:
+                            res = Table(projection(child.name, fv, context), fv, child.is_negative)
+                        else:
+                            res = Table(empty_table(fv, context), fv, child.is_negative)
                 else:
                     raise RuntimeError("FORALL: %s has to be subset of %s" % node.sub, child.fv)
             else:
                 raise RuntimeError("FORALL of non-Table not supported")
         elif node.op == 'PREVIOUS':
-            previous = context.previous[context.get_current_index()]
-            res = Table(table_copy(previous.name, context), previous.fv, previous.is_negative)
+            previous = context.previous[context.get_current_index() - 1]
+            if node.sub:
+                start, end = node.sub
+                ts_diff = context.current_ts - context.previous_ts
+                if start <= ts_diff <= end:
+                    if isinstance(previous, Table):
+                        res = Table(table_copy(previous.name, context), previous.fv, previous.is_negative)
+                    else:
+                        res = previous
+                else:
+                    res = Table(empty_table(previous.fv, context), previous.fv, False)
+            else:
+                if isinstance(previous, Table):
+                    res = Table(table_copy(previous.name, context), previous.fv, previous.is_negative)
+                else:
+                    res = previous
         elif node.op == 'ONCE':
-            previous = context.previous[context.get_current_index()]
-            res = union(child, previous, context)
+            if node.sub:
+                start, end = node.sub
+                ts_diff = context.current_ts - context.previous_ts
+                res = None
+                for to in range(0, end + 1):
+                    frm = max(0, to - (end - start))
+                    if frm > 0:
+                        if ts_diff <= to:
+                            res = context.previous[context.get_current_index() - ts_diff]
+                        else:
+                            res = Bool(False)
+                    else:
+                        if frm <= ts_diff <= to:
+                            previous = context.previous[context.get_current_index() - ts_diff]
+                        else:
+                            previous = Bool(False)
+                        res = union(child, previous, context)
+                    if to < end:
+                        context.current.append(res)
+            else:
+                previous = context.previous[context.get_current_index()]
+                res = union(child, previous, context)
+        elif node.op in ['SUM', 'MIN', 'MAX', 'CNT', 'AVG']:
+            if len(node.sub) == 2:
+                out, aggreg = node.sub
+                res = aggregation(child, node.op, out, aggreg, context)
+            elif len(node.sub) == 3:
+                out, aggreg, group_by = node.sub
+                res = aggregation(child, node.op, out, aggreg, context, group_by)
+            else:
+                raise RuntimeError("Error parsing aggregation")
         else:
             raise RuntimeError("Unhandled operator: " + node.op)
     elif isinstance(node, Leaf):
@@ -85,6 +170,7 @@ def visit(node: Node, data: dict, context: Context) -> EvalObject:
     else:
         raise RuntimeError("Error while parsing node: " + node.to_str())
     context.current.append(res)
+
     # if isinstance(res, Table):
     #     if isinstance(node, BinaryNode):
     #         print(res.name, res.fv, node.op, end=" ")
@@ -102,6 +188,7 @@ def visit(node: Node, data: dict, context: Context) -> EvalObject:
     #         print(res.v, node.op)
     #     elif isinstance(node, Leaf):
     #         print(res.v, node.typ, node.value)
+
     return res
 
 

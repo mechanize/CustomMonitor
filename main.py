@@ -39,6 +39,7 @@ with open(log_loc, 'r') as f:
             ts = int(parse_ts[0][1:])
         else:
             raise RuntimeError("No timestamp found")
+        context.set_ts(ts)
         data = {}
         for sig in dic.keys():
             data[sig] = (dic[sig][0].copy(), [])

@@ -11,7 +11,9 @@ class Context:
         self.count = 0
         self.var_count = 0
         self.current = []
-        self.previous = [Op.Bool(False) for _ in range(20)]
+        self.previous = [Op.Bool(False) for _ in range(30)]
+        self.current_ts = 0
+        self.previous_ts = 0
 
     def get_table_name(self):
         self.count += 1
@@ -38,6 +40,10 @@ class Context:
     def get_var_name(self):
         self.var_count += 1
         return "customvar_" + str(self.var_count)
+
+    def set_ts(self, v):
+        self.previous_ts = self.current_ts
+        self.current_ts = v
 
 
 

@@ -1,1 +1,1 @@
-in(t,w,f) IMPLIES (NOT close() SINCE open())
+cust(v) IMPLIES ((k <- SUM w ; .v ONCE[0,4] in(t,w,v)) IMPLIES k = 7)

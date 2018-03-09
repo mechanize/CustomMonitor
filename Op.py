@@ -155,7 +155,7 @@ def intersection(first: EvalObject, second: EvalObject, context: Context) -> Eva
                 if join_variables == {}:
                     name = cross_join(first.name, second.name, context)
                 else:
-                    name = outer_join(first.name, second.name, first.fv.intersection(second.fv), context)
+                    name = outer_join(first.name, second.name, first.fv, second.fv, context)
                 return Table(name, first.fv.union(second.fv), True)
             elif first.is_negative and not second.is_negative:
                 name = diff(second.name, first.name, second.fv, first.fv, context)
@@ -186,6 +186,26 @@ def negation(v: EvalObject, context: Context) -> EvalObject:
 
     else:
         raise RuntimeError("negation:", v)
+
+
+def aggregation(table: EvalObject, op: str, out: str, aggreg: str, context: Context, *args) -> EvalObject:
+    if isinstance(table, Table):
+        if table.is_negative:
+            raise RuntimeError("Cannot perform aggregation over negative table")
+        else:
+            if args:
+                group_by = args[0]
+                fv = {(out, "INT")}
+                for var_name in group_by:
+                    for v in table.fv:
+                        if var_name == v[0]:
+                            fv.add(v)
+                return Table(table_with_aggregation_and_grouping(table.name, op, out, aggreg, group_by, context), fv, False)
+            else:
+                fv = {(out, "INT")}
+                return Table(table_with_aggregation(table.name, op, out, aggreg, context), fv, False)
+    else:
+        raise RuntimeError("Cannot perform aggregation over non table")
 
 
 def table_with_condition(table: Table, condition: Condition, context: Context) -> Table:
@@ -321,10 +341,8 @@ def table_from_tuples(fv: [(str, str)] or [[str, str]], tuples: [tuple], context
     varlist2 = ", ".join([e for e, _ in fv])
     sql2 = """INSERT INTO {dest} ({varlist2}) VALUES ({values});"""
     with context.conn:
-        #print(sql.format(name=name, varlist=var_list))
         context.cursor.execute(sql.format(name=name, varlist=var_list))
         for t in tuples:
-            #print(sql2.format(dest=name, varlist2=varlist2, values=", ".join([format_value(e) for e in t])))
             context.cursor.execute(sql2.format(dest=name, varlist2=varlist2, values=", ".join([format_value(e) for e in t])))
     return name
 
@@ -334,3 +352,34 @@ def format_value(value: int or str) -> str:
         return str(value)
     elif isinstance(value, str):
         return "\"" + value + "\""
+
+
+def table_with_aggregation_and_grouping(first: str, op: str, out: str, aggreg: str, group_by: [str], context: Context):
+    sql = """CREATE TABLE {dest} AS
+             SELECT {aggregation} AS {out} , {varlist} FROM {src} GROUP BY {varlist} ;"""
+    command = {'SUM': 'sum',
+               'MIN': 'min',
+               'MAX': 'max',
+               'CNT': 'count',
+               'AVG': 'avg'}
+    aggregate = command.get(op) + "(" + aggreg + ")"
+    varlist = ", ".join(group_by)
+    name = context.get_table_name()
+    context.cursor.execute(sql.format(dest=name, aggregation=aggregate, out=out, varlist=varlist, src=first))
+    context.conn.commit()
+    return name
+
+
+def table_with_aggregation(first: str, op: str, out: str, aggreg: str, context: Context):
+    sql = """CREATE TABLE {dest} AS
+             SELECT {aggregation} AS {out} FROM {src} ;"""
+    command = {'SUM': 'sum',
+               'MIN': 'min',
+               'MAX': 'max',
+               'CNT': 'count',
+               'AVG': 'avg'}
+    aggregate = command.get(op) + "(" + aggreg + ")"
+    name = context.get_table_name()
+    context.cursor.execute(sql.format(dest=name, aggregation=aggregate, out=out, src=first))
+    context.conn.commit()
+    return name

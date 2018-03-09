@@ -11,19 +11,21 @@ def parse(tokens: [str, str]) -> Node:
     tokens = parse_binary_op(tokens, ['*', '/', 'MOD'], reverse=False, sub=False)
     tokens = parse_binary_op(tokens, ['+', '-'], reverse=False, sub=False)
     tokens = parse_binary_op(tokens, ['=', '<', '>', '<=', '>='], reverse=False, sub=False)
-    tokens = parse_unary_op(tokens, ['NOT'], reverse=True, sub=False)
+    tokens = parse_unary_op(tokens, ['NOT'], sub=False)
     tokens = parse_binary_op(tokens, ['AND'], reverse=False, sub=False)
     tokens = parse_binary_op(tokens, ['OR'], reverse=False, sub=False)
     tokens = parse_binary_op(tokens, ['IMPLIES'], reverse=True, sub=False)
     tokens = parse_binary_op(tokens, ['EQUIV'], reverse=False, sub=False)
-    tokens = parse_unary_op(tokens, ['EXISTS', 'FORALL'], reverse=True, sub=False)
-    tokens = parse_unary_op(tokens, ['PREVIOUS', 'NEXT', 'ONCE', 'ALWAYS'], reverse=True, sub=False)
-    tokens = parse_binary_op(tokens, ['SINCE'], reverse=True, sub=False)
+    tokens = parse_unary_op(tokens, ['EXISTS', 'FORALL'], sub=True)
+    tokens = parse_unary_op(tokens, ['PREVIOUS', 'ONCE'], sub=True)
+    tokens = parse_unary_op(tokens, ['ALWAYS'], sub=False)
+    tokens = parse_binary_op(tokens, ['SINCE'], reverse=True, sub=True)
+    tokens = parse_aggregation(tokens)
     if len(tokens) == 1:
         if isinstance(tokens[0], Node):
             return tokens[0]
     else:
-        raise RuntimeError("Parse failure")
+        raise RuntimeError("Parse failure:", tokens)
 
 
 def parse_parentheses(tokens: [str, str]) -> []:
@@ -63,37 +65,27 @@ def parse_parentheses(tokens: [str, str]) -> []:
     return new_tokens
 
 
-def parse_unary_op(tokens, op, reverse, sub):
+def parse_unary_op(tokens, op, sub):
     new_tokens = []
-    if reverse:
-        tokens = list(reversed(tokens))
+    tokens = list(reversed(tokens))
     for i, token in enumerate(tokens):
         if not isinstance(token, Node):
             if token[0] in op:
-                if reverse:
-                    next_token = tokens[i - 1]
-                    if sub:
-                        next_next_token = tokens[i - 2]
-                else:
-                    next_token = tokens[i + 1]
-                    if sub:
-                        next_next_token = tokens[i + 2]
-                if sub:
-                    node = UnaryNode(token[0], parse([next_next_token]), parse_sub(next_token))
+                next_token = new_tokens.pop()
+                if sub and not isinstance(next_token, Node):
+                    if next_token[1] in ['INTERVAL', 'VARLIST']:
+                        next_next_token = new_tokens.pop()
+                        node = UnaryNode(token[0], parse([next_next_token]), parse_sub(next_token))
+                    else:
+                        node = UnaryNode(token[0], parse([next_token]))
                 else:
                     node = UnaryNode(token[0], parse([next_token]))
-                node.child.parent = node
-                tokens[i] = node
-                new_tokens.pop()
                 new_tokens.append(node)
             else:
                 new_tokens.append(token)
         else:
             new_tokens.append(token)
-    if reverse:
-        return list(reversed(new_tokens))
-    else:
-        return new_tokens
+    return list(reversed(new_tokens))
 
 
 def parse_binary_op(tokens, op, reverse, sub):
@@ -108,23 +100,25 @@ def parse_binary_op(tokens, op, reverse, sub):
         if not isinstance(token, Node):
             if token[0] in op:
                 if reverse:
-                    next_token = tokens[i - 1]
-                    if sub:
-                        next_next_token = tokens[i - 2]
+                    next_token = new_tokens.pop()
                     prev_token = tokens[i + 1]
                 else:
                     next_token = tokens[i + 1]
-                    if sub:
-                        next_next_token = tokens[i + 2]
-                    prev_token = tokens[i - 1]
-                if sub:
-                    node = BinaryNode(token[0], parse([prev_token]), parse([next_next_token]), parse_sub(next_token))
+                    prev_token = new_tokens.pop()
+                if sub and not isinstance(next_token, Node):
+                    if next_token[1] in ['INTERVAL']:
+                        if reverse:
+                            next_next_token = new_tokens.pop()
+                        else:
+                            next_next_token = tokens[i + 2]
+                            skip_node += 1
+                        node = BinaryNode(token[0], parse([prev_token]), parse([next_next_token]), parse_sub(next_token))
+                    else:
+                        node = BinaryNode(token[0], parse([prev_token]), parse([next_token]))
+                        skip_node += 1
                 else:
                     node = BinaryNode(token[0], parse([prev_token]), parse([next_token]))
-                node.left.parent = node
-                node.right.parent = node
-                skip_node += 1
-                new_tokens.pop()
+                    skip_node += 1
                 new_tokens.append(node)
             else:
                 new_tokens.append(token)
@@ -144,9 +138,46 @@ def parse_sub(token):
     if token[1] == 'VARLIST':
         return token[0][1:].split(",")
     elif token[1] == 'INTERVAL':
-        return token[0][1:-1].split(",")
+        return [int(e) for e in token[0][1:-1].split(",")]
     else:
         raise RuntimeError("Could not parse sub: " + token[0])
+
+
+def parse_aggregation(tokens):
+    new_tokens = []
+    skip_node = 0
+    for i, token in enumerate(tokens):
+        if skip_node:
+            skip_node -= 1
+            continue
+        if not isinstance(token, Node):
+            if token[0] == '<-':
+                out = new_tokens.pop()
+                op = tokens[i + 1]
+                aggreg = tokens[i + 2]
+                secondary = [out[0], aggreg[0]]
+                if len(tokens) > i + 3:
+                    if not isinstance(tokens[i + 3], Node):
+                        if tokens[i + 3][0] == ';':
+                            secondary.append(parse_sub(tokens[i + 4]))
+                            skip_node = 5
+                            node = UnaryNode(op[0], parse([tokens[i + 5]]), secondary)
+                        else:
+                            skip_node = 3
+                            node = UnaryNode(op[0], parse([tokens[i + 3]]), secondary)
+                    else:
+                        skip_node = 3
+                        node = UnaryNode(op[0], parse([tokens[i + 3]]), secondary)
+                else:
+                    skip_node = 3
+                    node = UnaryNode(op[0], parse([tokens[i + 3]]), secondary)
+                new_tokens.append(node)
+            else:
+                new_tokens.append(token)
+        else:
+            new_tokens.append(token)
+    return new_tokens
+
 
 
 

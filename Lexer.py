@@ -1,27 +1,34 @@
 import re
 
 RESERVED = 'RESERVED'
-REWRITABLE = 'REWRITABLE'
 TEMPORAL = 'TEMPORAL'
 INT = 'INT'
 VAR = 'VAR'
 VARLIST = 'VARLIST'
+INTERVAL = 'INTERVAL'
+AGGREGATION = 'AGGREGATION'
+GROUPBY = 'GROUPBY'
 
 basic_rules = [
     (r'[ \n\t]+', None),
     (r'#[^\n]*', None),
     (r"\(", RESERVED),
     (r"\)", RESERVED),
-    (r"IMPLIES", REWRITABLE),
+    (r"IMPLIES", RESERVED),
+    (r"\[[0-9]+,[0-9]+\]", INTERVAL),
     (r"SINCE", TEMPORAL),
-    (r"UNTIL", TEMPORAL),
-    (r"NEXT", TEMPORAL),
     (r"PREVIOUS", TEMPORAL),
     (r"ONCE", TEMPORAL),
-    (r"EVENTUALLY", TEMPORAL),
     (r"AND", RESERVED),
     (r"OR", RESERVED),
     (r"NOT", RESERVED),
+    (r"<-", RESERVED),
+    (r"SUM", AGGREGATION),
+    (r"CNT", AGGREGATION),
+    (r"MIN", AGGREGATION),
+    (r"MAX", AGGREGATION),
+    (r"AVG", AGGREGATION),
+    (r";", GROUPBY),
     (r"<=", RESERVED),
     (r">=", RESERVED),
     (r"<", RESERVED),
@@ -56,6 +63,7 @@ def lex(characters, lexer_rules) -> [(str, str)]:
             raise RuntimeError("Illegal character \"" + characters[pos] + "\" at position " + str(pos))
         else:
             pos = match.end(0)
+    print(tokens)
     return tokens
 
 
